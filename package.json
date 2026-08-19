@@ -1,0 +1,19 @@
+{
+  "name": "chai-lounge-shop-backend",
+  "version": "1.0.0",
+  "description": "Backend for the Chai Lounge shop: creates Razorpay UPI orders, verifies payment, and grants Discord roles automatically.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "razorpay": "^2.9.4",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "better-sqlite3": "^11.1.2",
+    "cors": "^2.8.5"
+  }
+}

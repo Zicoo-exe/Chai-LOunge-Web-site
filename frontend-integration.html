@@ -1,0 +1,58 @@
+<!--
+  How the Chai Lounge shop buttons would talk to the backend instead of
+  just showing the static QR. Drop the Razorpay checkout script in <head>,
+  and replace the buy-btn click handler in chai-lounge.html with this.
+-->
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+<script>
+  const BACKEND_URL = 'https://your-backend.example.com'; // your deployed server.js
+
+  document.querySelectorAll('.buy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      // In production, get this from wherever the visitor is logged in
+      // (e.g. "Login with Discord" OAuth flow) rather than a prompt.
+      const discordUserId = prompt('Enter your Discord user ID (right-click your name → Copy User ID):');
+      if (!discordUserId) return;
+
+      const itemId = btn.getAttribute('data-item-id'); // e.g. "custom_role_colour"
+
+      const res = await fetch(`${BACKEND_URL}/api/create-order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, discordUserId }),
+      });
+      const order = await res.json();
+      if (order.error) return alert(order.error);
+
+      const rzp = new Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        order_id: order.orderId,
+        name: 'Chai Lounge',
+        description: order.itemName,
+        // Razorpay Checkout shows UPI, QR, cards, netbanking, etc. automatically
+        handler: function () {
+          alert('Payment received! Your role will land in Discord shortly.');
+          pollForFulfilment(order.orderId);
+        },
+        theme: { color: '#d8a63d' },
+      });
+      rzp.open();
+    });
+  });
+
+  async function pollForFulfilment(orderId) {
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const res = await fetch(`${BACKEND_URL}/api/order-status/${orderId}`);
+      const data = await res.json();
+      if (data.status === 'fulfilled') {
+        alert('Role granted — check your Discord!');
+        return;
+      }
+    }
+  }
+</script>
