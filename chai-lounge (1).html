@@ -446,6 +446,93 @@
   }
   .menu-row .count b{ color:var(--gold); font-weight:500; }
 
+  /* ---------- live member grid ---------- */
+  .live-stats-head{
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    padding-bottom:22px;
+    margin-bottom:22px;
+    border-bottom:1px solid var(--line-strong);
+  }
+  .live-count-big{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:42px;
+    color:var(--gold);
+    line-height:1;
+  }
+  .live-count-label{
+    font-family:"JetBrains Mono", monospace;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--ink-muted);
+  }
+  .live-count-label::before{
+    content:"";
+    display:inline-block;
+    width:7px; height:7px;
+    border-radius:50%;
+    background:#5fd97a;
+    margin-right:6px;
+  }
+  .member-list{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:10px;
+  }
+  @media (max-width:900px){ .member-list{ grid-template-columns:repeat(2, 1fr); } }
+  @media (max-width:520px){ .member-list{ grid-template-columns:1fr; } }
+  .member-empty{
+    grid-column:1 / -1;
+    padding:18px 0;
+    color:var(--ink-dim);
+    font-family:"JetBrains Mono", monospace;
+    font-size:13px;
+  }
+  .member-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 12px;
+    min-width:0;
+  }
+  .member-avatar-wrap{
+    position:relative;
+    flex-shrink:0;
+    width:26px; height:26px;
+  }
+  .member-avatar{
+    width:26px; height:26px;
+    border-radius:50%;
+    object-fit:cover;
+    display:block;
+    background:var(--panel);
+    border:1px solid var(--line-strong);
+  }
+  .member-status-dot{
+    position:absolute;
+    right:-2px; bottom:-2px;
+    width:9px; height:9px;
+    border-radius:50%;
+    box-shadow:0 0 0 2px var(--bg-2);
+  }
+  .member-status-dot.online{ background:#5fd97a; }
+  .member-status-dot.idle{ background:#e8b654; }
+  .member-status-dot.dnd{ background:#e05c4d; }
+  .member-name{
+    font-size:13.5px;
+    color:var(--ink);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    min-width:0;
+  }
+
   /* ---------- receipts / quotes ---------- */
   .receipts{
     display:grid;
@@ -742,7 +829,7 @@
       <p>Pulled live from Discord — refreshes on its own, no reload needed.</p>
     </div>
     <div class="profile-card">
-      <img class="profile-banner" src="https://cdn.discordapp.com/splashes/1521192076765822996/ab1f0cf281d43146cb817e7a511b2f40.jpg?size=512" alt="Chai Lounge server banner">
+      <img class="profile-banner" src="chai-lounge-banner.gif" alt="Chai Lounge server banner — pixel art cafe counter">
       <div class="profile-body">
         <div class="profile-id">
           <div class="profile-cup">
@@ -856,27 +943,16 @@
       <p>The full spread, tapri-style — what's on tap and who's already at the table.</p>
     </div>
     <div class="board">
-      <div class="menu-col-heads"><span>Item</span><span>Present</span></div>
-
-      <div class="menu-group">
-        <h4>Text Counters</h4>
-        <div class="menu-row"><span class="name">#introductions <small>tell the tapri your name and your order</small></span><span class="fill"></span><span class="count">welcomes daily</span></div>
-        <div class="menu-row"><span class="name">#elaichi-chat <small>the general lounge</small></span><span class="fill"></span><span class="count"><b>online now</b></span></div>
-        <div class="menu-row"><span class="name">#masala-debates <small>spicy takes, movies, cricket</small></span><span class="fill"></span><span class="count">runs hot</span></div>
-        <div class="menu-row"><span class="name">#music-and-memes <small>whatever's playing at the counter</small></span><span class="fill"></span><span class="count">fresh daily</span></div>
+      <div class="live-stats-head">
+        <span class="live-count-big" id="onlineHeadCount">…</span>
+        <span class="live-count-label">Online now</span>
       </div>
 
-      <div class="menu-group">
-        <h4>Voice Rooms</h4>
-        <div class="menu-row"><span class="name">Sulaimani Late Night <small>no milk, no filter, after midnight</small></span><span class="fill"></span><span class="count"><b>live</b></span></div>
-        <div class="menu-row"><span class="name">Filter Kaapi Study Room <small>quiet grind, shared timers</small></span><span class="fill"></span><span class="count">focus hours</span></div>
-        <div class="menu-row"><span class="name">The Long Table <small>big group hangs, games, watch-alongs</small></span><span class="fill"></span><span class="count">weekend rush</span></div>
-      </div>
-
-      <div class="menu-group">
-        <h4>Off the Board</h4>
-        <div class="menu-row"><span class="name">Weekly Kettle Prompt <small>one question, everyone answers</small></span><span class="fill"></span><span class="count">every Sunday</span></div>
-        <div class="menu-row"><span class="name">Regulars' Roles <small>earn your stripes, get your badge</small></span><span class="fill"></span><span class="count">by invite</span></div>
+      <div class="menu-group" id="onlineMembersGroup">
+        <h4>Members Online</h4>
+        <div id="memberList" class="member-list">
+          <div class="member-empty" id="memberEmpty">Checking who's around…</div>
+        </div>
       </div>
     </div>
   </section>
@@ -980,7 +1056,64 @@
     }
 
     refreshCounts();
-    setInterval(refreshCounts, 60000); // re-check every minute
+    setInterval(refreshCounts, 10000); // re-check every 10s
+  })();
+
+  // live "who's here right now" roster, pulled from Discord's public widget
+  // NOTE: requires Server Settings → Widget → Enable Server Widget to be ON
+  (function(){
+    var GUILD_ID = '1521192076765822996';
+    var listEl = document.getElementById('memberList');
+    var emptyEl = document.getElementById('memberEmpty');
+    var headCountEl = document.getElementById('onlineHeadCount');
+
+    function statusClass(status){
+      if (status === 'idle') return 'idle';
+      if (status === 'dnd') return 'dnd';
+      return 'online';
+    }
+
+    function render(members, presenceCount){
+      headCountEl.textContent = presenceCount;
+
+      if (!members || members.length === 0){
+        listEl.innerHTML = '<div class="member-empty">Quiet at the counter right now — be the first in.</div>';
+        return;
+      }
+
+      listEl.innerHTML = members.map(function(m){
+        var avatar = m.avatar_url || '';
+        return (
+          '<div class="member-row">' +
+            '<span class="member-avatar-wrap">' +
+              (avatar ? '<img class="member-avatar" src="' + avatar + '" alt="">' : '<span class="member-avatar"></span>') +
+              '<span class="member-status-dot ' + statusClass(m.status) + '"></span>' +
+            '</span>' +
+            '<span class="member-name">' + m.username + '</span>' +
+          '</div>'
+        );
+      }).join('');
+    }
+
+    function refreshMembers(){
+      fetch('https://discord.com/api/guilds/' + GUILD_ID + '/widget.json')
+        .then(function(res){
+          if (!res.ok) throw new Error('widget disabled or unavailable');
+          return res.json();
+        })
+        .then(function(data){
+          render(data.members, data.presence_count);
+        })
+        .catch(function(){
+          headCountEl.textContent = '—';
+          emptyEl.textContent = "Can't reach the counter right now.";
+          listEl.innerHTML = '';
+          listEl.appendChild(emptyEl);
+        });
+    }
+
+    refreshMembers();
+    setInterval(refreshMembers, 10000); // re-check every 10s
   })();
 
   // shop → payment modal
