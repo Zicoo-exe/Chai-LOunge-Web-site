@@ -1,7 +1,10 @@
 <!--
-  How the Chai Lounge shop buttons would talk to the backend instead of
-  just showing the static QR. Drop the Razorpay checkout script in <head>,
-  and replace the buy-btn click handler in chai-lounge.html with this.
+  This flow is now built directly into chai-lounge.html — you don't need to
+  copy anything from this file. It's kept here just as a reference for how
+  the checkout works: Buy button → create order on your backend → open
+  Razorpay Checkout → on success, poll for fulfilment. If BACKEND_URL in
+  chai-lounge.html is still the placeholder, it automatically falls back
+  to the manual QR + UPI modal instead.
 -->
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -16,7 +19,9 @@
       const discordUserId = prompt('Enter your Discord user ID (right-click your name → Copy User ID):');
       if (!discordUserId) return;
 
-      const itemId = btn.getAttribute('data-item-id'); // e.g. "custom_role_colour"
+      const itemId = btn.getAttribute('data-item-id');
+      // matches the SHOP_ITEMS keys in server.js:
+      // custom_role_colour | regulars_badge | vip_voice_access | pin_message
 
       const res = await fetch(`${BACKEND_URL}/api/create-order`, {
         method: 'POST',

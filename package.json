@@ -13,7 +13,6 @@
     "razorpay": "^2.9.4",
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",
-    "better-sqlite3": "^11.1.2",
     "cors": "^2.8.5"
   }
 }

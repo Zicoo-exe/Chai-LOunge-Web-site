@@ -1,43 +1,49 @@
 // Chai Lounge shop backend
 // -------------------------------------------------------------
+// SHOP / PAYMENTS
 // 1. Frontend calls POST /api/create-order with { itemId, discordUserId }
 // 2. Backend creates a Razorpay order and returns it to the frontend
 // 3. Frontend opens Razorpay Checkout (supports UPI/QR/cards) with that order
 // 4. Razorpay sends a signed webhook to POST /api/razorpay-webhook on payment
 // 5. Backend verifies the signature, marks the order paid, and grants the
 //    matching Discord role to the buyer automatically
+//
+// MEMBERS LIST
+// GET /api/members returns everyone currently online, grouped under their
+// highest "hoisted" Discord role (Admins, Regulars, etc — same grouping
+// Discord itself uses in its member sidebar). This needs the bot, because
+// role and presence data isn't available from a browser directly.
 // -------------------------------------------------------------
 
 require('dotenv').config();
+const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
-const Database = require('better-sqlite3');
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const PORT = process.env.PORT || 3000;
+const DB_FILE = 'orders.json';
 
 // ---------- shop catalogue (single source of truth, server-side) ----------
 // Prices are in paise (₹1 = 100 paise) because Razorpay expects the smallest unit.
 const SHOP_ITEMS = {
-  custom_role_colour: { name: 'Custom Role Colour', amount: 4900, roleEnv: 'DISCORD_ROLE_CUSTOM_COLOUR' },
-  regulars_badge:     { name: "Regular's Badge",     amount: 9900, roleEnv: 'DISCORD_ROLE_REGULAR_BADGE' },
-  vip_voice_access:   { name: 'VIP Voice Access',     amount: 14900, roleEnv: 'DISCORD_ROLE_VIP_VOICE' },
+  custom_role_colour: { name: 'Custom Role Colour', amount: 4900, type: 'role', roleEnv: 'DISCORD_ROLE_CUSTOM_COLOUR' },
+  regulars_badge:     { name: "Regular's Badge",     amount: 9900, type: 'role', roleEnv: 'DISCORD_ROLE_REGULAR_BADGE' },
+  vip_voice_access:   { name: 'VIP Voice Access',     amount: 14900, type: 'role', roleEnv: 'DISCORD_ROLE_VIP_VOICE' },
+  pin_message:        { name: 'Pin a Message — 24hrs', amount: 2900, type: 'notify' },
 };
 
-// ---------- storage (a tiny local SQLite file, fine for a small shop) ----------
-const db = new Database('orders.db');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS orders (
-    razorpay_order_id TEXT PRIMARY KEY,
-    item_id TEXT NOT NULL,
-    discord_user_id TEXT NOT NULL,
-    amount INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'created',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )
-`);
+// ---------- storage (plain JSON file — no native build required, unlike
+// better-sqlite3, which fails to install on some Windows setups) ----------
+function loadOrders() {
+  if (!fs.existsSync(DB_FILE)) return {};
+  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+}
+function saveOrders(orders) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(orders, null, 2));
+}
 
 // ---------- Razorpay client ----------
 const razorpay = new Razorpay({
@@ -46,16 +52,37 @@ const razorpay = new Razorpay({
 });
 
 // ---------- Discord bot ----------
-const discord = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+// GuildPresences + GuildMembers are "privileged intents" — you must also
+// turn them ON in the Discord Developer Portal → your app → Bot tab
+// ("Server Members Intent" and "Presence Intent"), or login will fail.
+const discord = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences,
+  ],
+});
 discord.once('ready', () => console.log(`Discord bot logged in as ${discord.user.tag}`));
 discord.login(process.env.DISCORD_BOT_TOKEN).catch((err) => {
-  console.error('Discord login failed — role granting will not work until this is fixed:', err.message);
+  console.error('Discord login failed — role granting/member list will not work until this is fixed:', err.message);
 });
 
 async function grantRole(discordUserId, roleId) {
   const guild = await discord.guilds.fetch(process.env.DISCORD_GUILD_ID);
   const member = await guild.members.fetch(discordUserId);
   await member.roles.add(roleId);
+}
+
+// For items that aren't a role (like a one-off "pin my message"), post a
+// note in your orders channel so you know to go do it manually.
+async function notifyOrdersChannel(text) {
+  const channelId = process.env.ORDERS_CHANNEL_ID;
+  if (!channelId) {
+    console.log('ORDERS_CHANNEL_ID not set — order notification skipped:', text);
+    return;
+  }
+  const channel = await discord.channels.fetch(channelId);
+  await channel.send(text);
 }
 
 // ---------- app ----------
@@ -111,9 +138,15 @@ app.post('/api/create-order', async (req, res) => {
       notes: { itemId, discordUserId },
     });
 
-    db.prepare(
-      `INSERT INTO orders (razorpay_order_id, item_id, discord_user_id, amount) VALUES (?, ?, ?, ?)`
-    ).run(order.id, itemId, discordUserId, item.amount);
+    const orders = loadOrders();
+    orders[order.id] = {
+      itemId,
+      discordUserId,
+      amount: item.amount,
+      status: 'created',
+      createdAt: new Date().toISOString(),
+    };
+    saveOrders(orders);
 
     res.json({
       orderId: order.id,
@@ -130,17 +163,15 @@ app.post('/api/create-order', async (req, res) => {
 
 // Let the frontend poll for fulfilment status after checkout closes
 app.get('/api/order-status/:orderId', (req, res) => {
-  const row = db
-    .prepare(`SELECT status FROM orders WHERE razorpay_order_id = ?`)
-    .get(req.params.orderId);
-  if (!row) return res.status(404).json({ error: 'not found' });
-  res.json({ status: row.status });
+  const orders = loadOrders();
+  const order = orders[req.params.orderId];
+  if (!order) return res.status(404).json({ error: 'not found' });
+  res.json({ status: order.status });
 });
 
 async function handlePaidOrder(razorpayOrderId) {
-  const order = db
-    .prepare(`SELECT * FROM orders WHERE razorpay_order_id = ?`)
-    .get(razorpayOrderId);
+  const orders = loadOrders();
+  const order = orders[razorpayOrderId];
 
   if (!order) {
     console.warn(`No local order found for ${razorpayOrderId}`);
@@ -148,16 +179,72 @@ async function handlePaidOrder(razorpayOrderId) {
   }
   if (order.status === 'fulfilled') return; // already handled, webhook can retry
 
-  const item = SHOP_ITEMS[order.item_id];
-  const roleId = process.env[item.roleEnv];
+  const item = SHOP_ITEMS[order.itemId];
 
-  await grantRole(order.discord_user_id, roleId);
+  if (item.type === 'role') {
+    const roleId = process.env[item.roleEnv];
+    await grantRole(order.discordUserId, roleId);
+    console.log(`Granted "${item.name}" to Discord user ${order.discordUserId}`);
+  } else if (item.type === 'notify') {
+    await notifyOrdersChannel(
+      `🧾 New order: **${item.name}** paid for by <@${order.discordUserId}> — needs manual action.`
+    );
+    console.log(`Notified orders channel for "${item.name}" from Discord user ${order.discordUserId}`);
+  }
 
-  db.prepare(`UPDATE orders SET status = 'fulfilled' WHERE razorpay_order_id = ?`).run(
-    razorpayOrderId
-  );
-
-  console.log(`Granted "${item.name}" to Discord user ${order.discord_user_id}`);
+  order.status = 'fulfilled';
+  orders[razorpayOrderId] = order;
+  saveOrders(orders);
 }
+
+// ---------- live members, grouped by their highest hoisted role ----------
+// "Hoisted" = the role has "Display role members separately" turned on in
+// Discord (Server Settings → Roles) — that's what makes a role show up as
+// its own header in Discord's own member list, and we mirror that here.
+app.get('/api/members', async (req, res) => {
+  try {
+    const guild = await discord.guilds.fetch(process.env.DISCORD_GUILD_ID);
+    await guild.members.fetch(); // populates the member cache, including presences
+    const roles = await guild.roles.fetch();
+
+    const hoistedRoles = [...roles.values()]
+      .filter((r) => r.hoist && r.name !== '@everyone')
+      .sort((a, b) => b.position - a.position); // highest role first
+
+    const groups = hoistedRoles.map((r) => ({
+      roleId: r.id,
+      roleName: r.name,
+      color: r.hexColor === '#000000' ? '#d8a63d' : r.hexColor,
+      members: [],
+    }));
+    const fallback = { roleId: null, roleName: 'Online', color: '#d8a63d', members: [] };
+
+    let onlineCount = 0;
+
+    guild.members.cache.forEach((member) => {
+      const status = member.presence?.status;
+      if (!status || status === 'offline') return; // only show online members
+      onlineCount++;
+
+      const memberEntry = {
+        username: member.displayName,
+        avatar: member.user.displayAvatarURL({ extension: 'png', size: 64 }),
+        status, // 'online' | 'idle' | 'dnd'
+      };
+
+      const topHoisted = hoistedRoles.find((r) => member.roles.cache.has(r.id));
+      const bucket = topHoisted
+        ? groups.find((g) => g.roleId === topHoisted.id)
+        : fallback;
+      bucket.members.push(memberEntry);
+    });
+
+    const result = [...groups, fallback].filter((g) => g.members.length > 0);
+    res.json({ groups: result, onlineCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'could not fetch members' });
+  }
+});
 
 app.listen(PORT, () => console.log(`Shop backend running on http://localhost:${PORT}`));
